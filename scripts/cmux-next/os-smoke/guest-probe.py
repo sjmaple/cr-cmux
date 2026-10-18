@@ -493,8 +493,19 @@ try:
                 threads = [threading.Thread(target=lambda p=p: samples.__setitem__("d%d" % p, sample_pid(p, "d%d" % i, "daemon")))
                            for p, _ in pids[:4]]
                 threads.append(threading.Thread(target=lambda: samples.__setitem__("app", sample_pid(app.pid, "a%d" % i, "app"))))
+                ns = subprocess.run(["/usr/sbin/netstat", "-f", "unix", "-n"], capture_output=True, text=True).stdout
                 for t in threads: t.start()
+                ns2 = subprocess.run(["/usr/sbin/netstat", "-f", "unix", "-n"], capture_output=True, text=True).stdout
                 for t in threads: t.join(95)
+                ns3 = subprocess.run(["/usr/sbin/netstat", "-f", "unix", "-n"], capture_output=True, text=True).stdout
+                def queued(text):
+                    rows = []
+                    for l in text.splitlines():
+                        f = l.split()
+                        if len(f) >= 4 and f[1] == "stream" and (f[2] != "0" or f[3] != "0"):
+                            rows.append(" ".join(f[1:4] + f[-1:])[-120:])
+                    return rows
+                samples["netstat"] = [queued(ns), queued(ns2), queued(ns3)]
                 samples["pids"] = pids
             done.wait(10)
             state = wait(lambda: (lambda s: s if isinstance(s, dict) and s.get("url") == url and s.get("title") == TITLE else None)(
@@ -508,9 +519,12 @@ try:
             if samples:
                 summary = {"pids": samples.get("pids")}
                 for key, text in samples.items():
-                    if key == "pids" or not text:
+                    if key in ("pids", "netstat") or not text:
                         continue
                     paths = heavy_paths(text, [""])
+                    if key == "app":
+                        summary["app_writer"] = [t[:90] + " :: " + p[-1][1][:60] for t, p in paths.items() if "daemon.write" in t or "SocketWriter" in " ".join(n for _, n in p)]
+                        summary["app_gcd"] = sum(1 for t in paths if "DispatchQueue" in t or "Thread_" in t)
                     idle = ("__workq_kernreturn", "kevent", "__psynch_cvwait", "mach_msg2_trap", "__semwait_signal", "__select", "poll", "__accept")
                     summary[key] = {t[:70]: [n for _, n in p[-7:]] for t, p in paths.items()
                                     if "main-thread" in t or "reader" in t or "dispatch" in t or not any(p[-1][1].startswith(x) for x in idle)}
@@ -569,13 +583,15 @@ try:
         for entry in DIAG:
             print("wkslow    %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
             samples = entry.get("samples") or {}
-            print("wkpids    %d %s" % (entry["i"], json.dumps(samples.get("pids"))[:700]), flush=True)
+            print("wknet     %d %s" % (entry["i"], json.dumps(samples.get("netstat"))[:1500]), flush=True)
+            print("wkwriter  %d %s gcd=%s" % (entry["i"], json.dumps(samples.get("app_writer"))[:800], samples.get("app_gcd")), flush=True)
             for key, paths in samples.items():
-                if key == "pids" or not isinstance(paths, dict):
+                if key in ("pids", "netstat", "app_writer", "app_gcd") or not isinstance(paths, dict) or key != "app" and "_" in key:
                     continue
                 print("wkthreads %d %s total=%s shown=%d" % (entry["i"], key, samples.get(key + "_threads"), len(paths)), flush=True)
-                for thread, frames in list(paths.items())[:14]:
-                    print("wks %d %s | %s | %s" % (entry["i"], key, thread[:60], " < ".join(reversed(frames))[:700]), flush=True)
+                for thread, frames in [(t, f) for t, f in paths.items() if key == "app" or "dispatch" in t or "out" in t][:8]:
+                    print("wks %d %s | %s | %s" % (entry["i"], key, thread[:60], " < ".join(reversed(frames[-4:]))[:300]), flush=True)
+            print("wkslow2   %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
         sys.stdout.flush()
         os._exit(0 if all(results) else 1)
         settings = rpc("settings.open", {"focus": True})
