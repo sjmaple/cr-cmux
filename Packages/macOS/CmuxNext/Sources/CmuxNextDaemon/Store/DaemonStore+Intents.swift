@@ -111,6 +111,7 @@ extension DaemonStore {
             intentSettlements.append((intent.transaction, .applied))
         }
         releaseSettledProvisionalPanes()
+        releaseSettledProvisionalWorkspaces()
         let confirmedTabs = debugTabCensus()
         restoreOverlay()
         overlayLifted = false
@@ -130,8 +131,17 @@ extension DaemonStore {
     /// `layout-changed` that places it can land after the reply's settle sequence, and undoing
     /// the split before them showed the pane unsplit for one turn.
     private func awaitsRecords(_ intent: PendingIntent) -> Bool {
-        guard case .splitPane(_, _, _, let provisional) = intent.kind else { return false }
-        return !ProvisionalSplit.daemonPlaces(provisional, in: self)
+        switch intent.kind {
+        case .splitPane(_, _, _, let provisional):
+            return !ProvisionalSplit.daemonPlaces(provisional, in: self)
+        case .createWorkspace(let provisional, _):
+            // Settled only once the daemon's workspace holds a tab: before that, undoing the
+            // overlay would show the window an empty workspace for a turn.
+            guard let workspace = workspacesByKey[provisional.key] else { return true }
+            return !workspace.screens.contains { $0.panes.contains { !$0.tabs.isEmpty } }
+        default:
+            return false
+        }
     }
 
     /// The pane model of a split that left the log (settled or refused) is no longer provisional.
@@ -151,6 +161,26 @@ extension DaemonStore {
         guard let model = provisionalPanes.removeValue(forKey: PaneModel.identity(snapshot)) else { return PaneModel(snapshot) }
         model.update(snapshot)
         return model
+    }
+
+    /// The record of a workspace the daemon reports: the provisional workspace's own model when a
+    /// pending create shows it under the same key, updated in place (as ``confirmedPane(_:)``);
+    /// else a new model.
+    func confirmedWorkspace(_ snapshot: WorkspaceSnapshot) -> WorkspaceModel {
+        guard let model = provisionalWorkspaces[WorkspaceModel.identity(snapshot)] else { return WorkspaceModel(snapshot) }
+        model.update(snapshot)
+        return model
+    }
+
+    /// The models of a workspace create that left the log (settled or refused) are no longer provisional.
+    private func releaseSettledProvisionalWorkspaces() {
+        guard !provisionalWorkspaces.isEmpty || !provisionalScreens.isEmpty else { return }
+        let pending = Set(intentLog.entries.compactMap { entry -> String? in
+            if case .createWorkspace(let provisional, _) = entry.kind { return provisional.key.rawValue }
+            return nil
+        })
+        provisionalWorkspaces = provisionalWorkspaces.filter { pending.contains($0.key) }
+        provisionalScreens = provisionalScreens.filter { pending.contains($0.key) }
     }
 
     /// A new connection replaces the last one (`run(connection:)`): its

@@ -21,6 +21,9 @@ enum IntentUndo: Equatable {
     /// The screen's split tree and columns before a provisional split, and the provisional pane
     /// (nil when the split placed the daemon's pane, which the records already list).
     case splitPane(screen: ScreenID, layout: LayoutNode, columns: [ColumnSnapshot], pane: PaneID?)
+    /// The provisional screen shown in workspace `key`, and whether the workspace itself was the
+    /// provisional one (inserted) rather than the daemon's.
+    case createdWorkspace(key: WorkspaceKey, inserted: Bool)
 }
 
 struct PendingIntent {

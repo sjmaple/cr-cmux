@@ -62,6 +62,8 @@ import Foundation
             pane.insertTab(tab, at: pane.tabs.count)
             store.index.insert(tab, in: pane)
             return .createdTab(surface: provisional.surface, pane: paneHandle)
+        case .createWorkspace(let provisional, let index):
+            return ProvisionalWorkspaceOverlay.apply(provisional, index: index, to: store)
         case .splitPane(let target, let direction, let ratio, let provisional):
             return ProvisionalSplit.apply(target: target, direction: direction, ratio: ratio,
                                           provisional: provisional, to: store)
@@ -145,6 +147,8 @@ import Foundation
             if let pane = store.pane(holding: tab) { store.index.insert(tab, in: pane) }
         case .splitPane(let screen, let layout, let columns, let pane):
             ProvisionalSplit.undo(screen: screen, layout: layout, columns: columns, pane: pane, in: store)
+        case .createdWorkspace(let key, let inserted):
+            ProvisionalWorkspaceOverlay.undo(key: key, inserted: inserted, in: store)
         case .createdTab(let surface, let pane):
             guard let tab = store.panesByHandle[pane]?.removeTab(surface: surface) else {
                 if let stray = store.tabsBySurface[surface] { store.index.remove(stray) }
