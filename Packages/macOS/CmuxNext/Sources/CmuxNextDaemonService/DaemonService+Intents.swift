@@ -95,6 +95,10 @@ extension DaemonService {
             Task.detached(priority: .high) { WkDiag.note("pool probe ran (detached high)") }
             // task-owner: proof only, one note
             Task.detached(priority: .medium) { WkDiag.note("pool probe ran (detached medium)") }
+            Thread.detachNewThread { WkDiag.note("probe: new pthread ran") }
+            DispatchQueue.global(qos: .userInitiated).async { WkDiag.note("probe: global user-initiated queue ran") }
+            DispatchQueue(label: "wk.probe.serial").async { WkDiag.note("probe: serial queue ran") }
+            DispatchQueue.main.async { WkDiag.note("probe: main queue ran") }
         }
         guard let connection else {
             await closeTicket(ticket, label: label, error: DaemonError.notConnected)

@@ -183,7 +183,7 @@ def dump_slow():
             leaf = frames[-1].split(" ")[0]
             if leaf in ("__workq_kernreturn", "kevent64", "kevent", "mach_msg2_trap", "__select", "poll") and "cooperative" not in t:
                 continue
-            rows.append("wkthr  %s %s| %s" % (p[0], t[:60], " < ".join(reversed(frames[-12:]))))
+            rows.append("wkthr  %s %s| %s" % (p[0], re.sub(r"\s+", " ", t)[:90], " < ".join(reversed(frames[-12:]))))
         for r in rows[:22]:
             print(r[:1100], flush=True)
 
@@ -616,7 +616,7 @@ try:
                     LATE.append("wkstack   %d %s %s| %s" % (i, t[:46], p[0][0], " < ".join(reversed(leaf)))[:420])
                 LATE.append("wkps      %d %s" % (i, " | ".join(re.sub(r"\s+", " ", l.strip())[-70:] for l in samples.get("ps") or [])))
                 LATE[:] = LATE[:1] + [r for r in LATE[1:] if r.startswith(("wkstack", "wkps"))][:13] + [r for r in LATE[1:] if not r.startswith(("wkstack", "wkps"))]
-                for name, keep in (("/tmp/cmux-wk-app.log", 9), ("/tmp/cmux-wk-daemon.log", 0)):
+                for name, keep in (("/tmp/cmux-wk-app.log", 24), ("/tmp/cmux-wk-daemon.log", 0)):
                     try:
                         rows = [r for r in open(name, errors="replace").read().splitlines()
                                 if '{"data":{"generation"' not in r and "wrote reply" not in r and "writing reply" not in r
@@ -695,9 +695,9 @@ try:
                 app.wait()
         write_result()
         print("wksummary %s" % json.dumps({"runs": len(results), "failed": [i for i, r in enumerate(results) if not r]}), flush=True)
-        rows = [r for r in LATE if r.startswith("wktrace") and re.search(r"perform|pool probe|request|submit", r)][-6:]
+        rows = [r for r in LATE if r.startswith("wktrace") and re.search(r"perform|probe|request|submit", r)][-12:]
         if rows:
-            print("wktl %s" % " ; ".join(r.split(" app ", 1)[-1][:120] for r in rows), flush=True)
+            print("wktl %s" % " ; ".join(r.split(" app ", 1)[-1][:90] for r in rows), flush=True)
         dump_slow()
         for entry in []:
             print("wkslow    %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
