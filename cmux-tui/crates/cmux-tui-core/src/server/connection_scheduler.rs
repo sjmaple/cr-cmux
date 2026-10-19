@@ -165,6 +165,9 @@ impl ConnectionSurfaceScheduler {
                 });
             }
         };
+        if matches!(request.as_ref().unwrap().cmd, super::Command::NewFrontendBrowserTab(_)) {
+            crate::wk_diag::note(&format!("queued depth={} creations={} started={} clear={}", state.requests.len(), state.active_creations, state.dispatcher_started, state.active_clear_surfaces.len()));
+        }
         let start_dispatcher = !state.dispatcher_started;
         state.dispatcher_started = true;
         state.queued_bytes = state.queued_bytes.saturating_add(retained_bytes);
@@ -434,7 +437,19 @@ fn run_connection_surface_dispatcher(
                 scheduler.close();
                 return;
             }
-        } else if !run_pending_request(&scheduler, &mux, client, pending, &writer) {
+        } else if !{
+            let wk = matches!(pending.request.cmd, super::Command::NewFrontendBrowserTab(_));
+            if wk {
+                crate::wk_diag::note("run start");
+            }
+            let started = Instant::now();
+            let kept = run_pending_request(&scheduler, &mux, client, pending, &writer);
+            let ms = started.elapsed().as_millis();
+            if wk || ms >= 100 {
+                crate::wk_diag::note(&format!("run end wk={wk} ms={ms}"));
+            }
+            kept
+        } {
             scheduler.close();
             return;
         }

@@ -855,8 +855,11 @@ impl Mux {
         let browser_id = BrowserPublicId::random()?;
         {
             let mut registry = self.workspace_registry.lock().unwrap();
+            crate::wk_diag::note("registry locked");
             registry.put_frontend_browser(browser_id.as_str(), &record, None)?;
+            crate::wk_diag::note("registry put");
             self.reload_presentation(&registry)?;
+            crate::wk_diag::note("presentation reloaded");
         }
         let fields = frontend_browser_fields(&browser_id, placement);
         match self.new_browser_tab_with_fields_as(actor, record.url.clone(), pane, size, fields) {

@@ -70,6 +70,7 @@ pub(super) fn create(mux: &Arc<Mux>, client: u64, params: NewTabParams) -> anyho
         activate,
         after,
     } = params;
+    crate::wk_diag::note(&format!("create start key={}", idempotency_key.is_some()));
     let profile_id = profile_id
         .map(|profile| {
             mux.workspace_registry
@@ -110,6 +111,7 @@ pub(super) fn create(mux: &Arc<Mux>, client: u64, params: NewTabParams) -> anyho
             false,
         ),
     };
+    crate::wk_diag::note(&format!("create done surface={}", surface.id));
     let identity = surface.resource_identity();
     Ok(json!({
         "surface": surface.id,

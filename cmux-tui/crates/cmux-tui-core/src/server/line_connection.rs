@@ -45,7 +45,15 @@ pub(super) fn serve_line_connection(
     let Ok(writer_thread) =
         std::thread::Builder::new().name("mux-line-out".into()).spawn(move || {
             while let Some(item) = writer_outbound.recv() {
-                if write_line_outbound_item(&mut *write_half, item).is_err() {
+                let wk = matches!(&item, OutboundItem::Text(text) if text.text.contains("tab_resource_id"));
+                if wk {
+                    crate::wk_diag::note("writing reply");
+                }
+                let failed = write_line_outbound_item(&mut *write_half, item).is_err();
+                if wk {
+                    crate::wk_diag::note(&format!("wrote reply failed={failed}"));
+                }
+                if failed {
                     writer_outbound.close();
                     let _ = write_half.shutdown(Shutdown::Both);
                     break;
@@ -92,10 +100,14 @@ pub(super) fn serve_line_connection(
             drain_accepted = false;
             break;
         }
+        if line.contains("new-frontend-browser-tab") {
+            crate::wk_diag::note(&format!("recv client={client} {}", &line[..line.len().min(160)]));
+        }
         if line.trim().is_empty() {
             zeroize_string(&mut line);
             continue;
         }
+        let line_started = Instant::now();
         let keep_open = match admission.refusal(&line) {
             Some(refusal) => {
                 // A refused line still counts as a line: the window closes.
@@ -123,6 +135,10 @@ pub(super) fn serve_line_connection(
                 }
             }
         };
+        let line_ms = line_started.elapsed().as_millis();
+        if line_ms >= 100 {
+            crate::wk_diag::note(&format!("slow inline line client={client} ms={line_ms} {}", &line[..line.len().min(120)]));
+        }
         zeroize_string(&mut line);
         if !keep_open {
             drain_accepted = false;

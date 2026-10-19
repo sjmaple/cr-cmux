@@ -516,6 +516,16 @@ try:
             waits = ((err or {}).get("data") or {}).get("waiting_on") if isinstance(err, dict) else None
             entry = {"i": i, "ok": ok, "ms": box.get("ms"), "waits": waits}
             print("wkloop    %s" % json.dumps(entry)[:700], flush=True)
+            if not ok:
+                wait(lambda: False, 20, alive)
+                print("wklate    %d state=%s" % (i, json.dumps(rpc("browser.page.state"))[:300]), flush=True)
+            for name in ("/tmp/cmux-wk-app.log", "/tmp/cmux-wk-daemon.log"):
+                try:
+                    tail = open(name, errors="replace").read().splitlines()[-(45 if not ok else 12):]
+                except OSError as error:
+                    tail = ["(%s)" % error]
+                for row in tail:
+                    print("wktrace   %d %s %s" % (i, os.path.basename(name)[8:-4], row[:400]), flush=True)
             if samples:
                 summary = {"pids": samples.get("pids")}
                 for key, text in samples.items():

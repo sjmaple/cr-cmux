@@ -85,7 +85,11 @@ final class SocketWriter: Sendable {
                 return state.pending
             }
             guard let chunk else { return }
-            if let failure = Self.writeAll(chunk, fd: fd) {
+            let wk = WkDiag.mentions(chunk, "new-frontend-browser-tab")
+            if wk { WkDiag.note("drain writing \(chunk.count) bytes fd=\(fd)") }
+            let failure = Self.writeAll(chunk, fd: fd)
+            if wk { WkDiag.note("drain wrote failure=\(failure.map { "\($0)" } ?? "none")") }
+            if let failure {
                 state.withLock { state in
                     state.failure = failure
                     state.pending = Data()

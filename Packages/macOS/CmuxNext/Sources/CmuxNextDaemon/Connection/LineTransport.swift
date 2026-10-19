@@ -271,7 +271,10 @@ final class LineTransport: Sendable {
             submittedID = id
             var line = payload
             line.append(0x0A)
+            let wk = WkDiag.mentions(line, "new-frontend-browser-tab")
+            if wk { WkDiag.note("submit #\(id) fd=\(socket.fd) queued=\(writer.queuedBytes) draining=\(writer.isDraining) \(path)") }
             writeFailure = socket.fd >= 0 ? writer.write(line)?.description : "socket closed"
+            if wk { WkDiag.note("handed #\(id) failure=\(writeFailure ?? "none") queued=\(writer.queuedBytes) draining=\(writer.isDraining)") }
             return nil
         }
         if let early {
@@ -335,7 +338,10 @@ final class LineTransport: Sendable {
                 closeDetail = "read: \(String(cString: strerror(errno)))"
                 break
             }
+            let started = DispatchTime.now().uptimeNanoseconds
             lines.append(chunk.prefix(count)) { route($0, decoder: decoder, onEvent: onEvent) }
+            let routeMs = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+            if routeMs >= 50 { WkDiag.note("slow route \(routeMs) ms for \(count) bytes fd=\(fd)") }
             if lines.pending.count > Self.maxLineBytes {
                 closeDetail = "line exceeds \(Self.maxLineBytes) bytes"
                 break reading
@@ -361,7 +367,12 @@ final class LineTransport: Sendable {
     var routedEventCount: UInt64 { state.withLock { $0.eventCount } }
 
     private func route(_ line: Data, decoder: JSONDecoder, onEvent: EventHandler) {
-        guard let envelope = try? decoder.decode(Envelope.self, from: line) else { return }
+        let wk = WkDiag.mentions(line, "tab_resource_id")
+        if wk { WkDiag.note("read reply \(String(decoding: line.prefix(200), as: UTF8.self))") }
+        guard let envelope = try? decoder.decode(Envelope.self, from: line) else {
+            WkDiag.note("undecodable line \(line.count) bytes \(String(decoding: line.prefix(160), as: UTF8.self))")
+            return
+        }
         // A v2 stream line goes to the stream handler of a dedicated
         // connection (`SessionJournalRead`); on the control connection it
         // travels with the raw events, in socket order (`session.events`).
@@ -385,6 +396,7 @@ final class LineTransport: Sendable {
             state.order.removeAll { $0 == id }
             return (state.eventCount, waiter)
         }
+        if wk { WkDiag.note("reply waiter found=\(waiter != nil) id=\(envelope.id.map(String.init) ?? "nil")") }
         guard let (barrier, waiter) = waiter else { return }
         if envelope.ok == true {
             if case .reply(_, let slot) = waiter { slot.resolve(.success(Response(line: line, eventBarrier: barrier))) }
