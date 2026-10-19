@@ -196,8 +196,8 @@ final class LineTransport: Sendable {
         // A failed submit resolved the slot already.
         guard case .success(let id) = submitted else { return try await slot.value() }
         let scope = DaemonCommandScope.current
-        scope?.note("wrote \(cmd) #\(id)")
-        defer { scope?.note("slot \(cmd) #\(id)") }
+        scope?.note("wrote \(cmd) #\(id) qos=\(qos_class_self().rawValue) prio=\(Task.currentPriority.rawValue) queued=\(writer.queuedBytes)")
+        defer { scope?.note("slot \(cmd) #\(id) queued=\(writer.queuedBytes) draining=\(writer.isDraining)") }
         let timer = DemandTimer(owner: "LineTransport.deadline")
         defer { timer.cancel() }
         if let timeout { timer.schedule(after: timeout) { [weak self] in self?.expire(id: id, after: timeout) } }

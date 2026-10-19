@@ -59,6 +59,8 @@ final class SocketWriter: Sendable {
 
     /// Bytes waiting for the socket (diagnostics, tests).
     var queuedBytes: Int { state.withLock { $0.pending.count } }
+    /// Whether a drain is scheduled or running (diagnostics).
+    var isDraining: Bool { state.withLock { $0.draining } }
 
     /// Stops writing; queued bytes are dropped. The owner shuts the
     /// descriptor down, which also ends a write in progress.

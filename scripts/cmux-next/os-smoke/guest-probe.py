@@ -529,6 +529,7 @@ try:
                     summary[key] = {t[:70]: [n for _, n in p[-7:]] for t, p in paths.items()
                                     if "main-thread" in t or "reader" in t or "dispatch" in t or not any(p[-1][1].startswith(x) for x in idle)}
                     summary[key + "_threads"] = len(paths)
+                summary["netstat"] = samples.get("netstat")
                 entry["samples"] = summary
                 DIAG.append(entry)
             return ok
