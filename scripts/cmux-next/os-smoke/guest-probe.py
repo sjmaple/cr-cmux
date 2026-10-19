@@ -127,13 +127,16 @@ def _grab_slow(method, started):
     if len(SLOW) >= 3 or "app" not in globals():
         return
     ps = subprocess.run(["/bin/ps", "-Ao", "pcpu=,pri=,comm=", "-r"], capture_output=True, text=True).stdout.splitlines()[:6]
+    ti = subprocess.run(["/usr/bin/sudo", "-n", "/usr/bin/taskinfo", str(app.pid)], capture_output=True, text=True)
+    policy = [l.strip() for l in (ti.stdout + ti.stderr).splitlines()
+              if re.search(r"role|tier|darwinbg|qos|nap|latency|throughput|suppress|clamp|bg|boost|importance|apptype|tal", l, re.I)][:14]
     path = "/tmp/wk-slow-%d.txt" % len(SLOW)
     subprocess.run(["/usr/bin/sample", str(app.pid), "1", "-mayDie", "-file", path], capture_output=True, timeout=60)
     try:
         text = open(path, errors="replace").read()
     except OSError:
         text = ""
-    SLOW.append({"method": method, "at": round(time.time() - started, 2), "ps": ps, "text": text})
+    SLOW.append({"method": method, "at": round(time.time() - started, 2), "ps": ps, "text": text, "policy": policy})
 
 
 def _heavy(text):
@@ -174,14 +177,15 @@ IDLE_LEAF = ("__workq_kernreturn", "mach_msg2_trap", "kevent", "__psynch_cvwait"
 def dump_slow():
     for entry in SLOW[:2]:
         print("wkslowrpc %s at %ss ncpu=%s ps: %s" % (entry["method"], entry["at"], os.cpu_count(),
-              " | ".join(re.sub(r"\s+", " ", l.strip())[-48:] for l in entry["ps"])), flush=True)
+              " | ".join(re.sub(r"\s+", " ", l.strip())[:14] + "~" + l.strip()[-22:] for l in entry["ps"])), flush=True)
+        print("wkpolicy  %s" % " ; ".join(entry.get("policy") or [])[:1400], flush=True)
         rows = []
         for t, p in _heavy(entry["text"]).items():
             frames = p[1:]
-            if "main-thread" not in t and "DispatchQueue" not in t and frames[-1].split(" ")[0] in IDLE_LEAF:
+            if "main-thread" in t or "watchdog" in t or frames[-1].split(" ")[0] in IDLE_LEAF + ("kevent64",):
                 continue
             rows.append("wkthr  %s %s| %s" % (p[0], t[:50], " < ".join(reversed(frames[-5:]))))
-        for r in rows[:11]:
+        for r in rows[:5]:
             print(r[:400], flush=True)
 
 
@@ -692,8 +696,8 @@ try:
                 app.wait()
         write_result()
         print("wksummary %s" % json.dumps({"runs": len(results), "failed": [i for i, r in enumerate(results) if not r]}), flush=True)
-        for row in LATE[:4]:
-            print(row, flush=True)
+        for row in [r for r in LATE if r.startswith("wklate")][:1] + [r for r in LATE if r.startswith("wktrace") and re.search(r"perform|pool probe|request|submit|quiet|release", r)][-7:]:
+            print(row[:330], flush=True)
         dump_slow()
         for entry in []:
             print("wkslow    %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
