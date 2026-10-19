@@ -490,6 +490,7 @@ try:
             threading.Thread(target=call, daemon=True).start()
             samples = {}
             if not done.wait(0.45):
+                samples["ps"] = subprocess.run(["/bin/ps", "-Ao", "pcpu=,pri=,comm=", "-r"], capture_output=True, text=True).stdout.splitlines()[:5]
                 samples["app_text"] = sample_pid(app.pid, "a%d" % i, "app")
             if False and not done.wait(1.2):
                 pids = daemon_pids()
@@ -526,23 +527,26 @@ try:
                 text = samples.get("app_text") or ""
                 for t, p in heavy_paths(text, [""]).items():
                     names = [n for _, n in p]
-                    if not ("cooperative" in t or "main-thread" in t or any("DaemonConnection" in n for n in names)):
+                    idle_leaf = names[-1].startswith(("__workq_kernreturn", "mach_msg2_trap", "kevent", "__psynch_cvwait", "semaphore_wait_trap", "read ", "__select", "poll ", "__semwait_signal", "__accept", "__recvfrom", "__ulock_wait"))
+                    if "main-thread" in t or ("DispatchQueue" not in t and idle_leaf):
                         continue
                     leaf = [re.sub(r"\s+\(in [^)]*\)", "", n)[:60] for n in names[-6:]]
                     LATE.append("wkstack   %d %s %s| %s" % (i, t[:46], p[0][0], " < ".join(reversed(leaf)))[:420])
-                LATE[:] = LATE[:1] + [r for r in LATE[1:] if r.startswith("wkstack")][:12] + [r for r in LATE[1:] if not r.startswith("wkstack")]
-                for name, keep in (("/tmp/cmux-wk-app.log", 12), ("/tmp/cmux-wk-daemon.log", 2)):
+                LATE.append("wkps      %d %s" % (i, " | ".join(re.sub(r"\s+", " ", l.strip())[-70:] for l in samples.get("ps") or [])))
+                LATE[:] = LATE[:1] + [r for r in LATE[1:] if r.startswith(("wkstack", "wkps"))][:13] + [r for r in LATE[1:] if not r.startswith(("wkstack", "wkps"))]
+                for name, keep in (("/tmp/cmux-wk-app.log", 9), ("/tmp/cmux-wk-daemon.log", 0)):
                     try:
                         rows = [r for r in open(name, errors="replace").read().splitlines()
-                                if '{"data":{"generation"' not in r and "wrote reply" not in r and "writing reply" not in r]
+                                if '{"data":{"generation"' not in r and "wrote reply" not in r and "writing reply" not in r
+                                and "read reply" not in r and "waiter found" not in r and "drain wr" not in r]
                     except OSError as error:
                         rows = ["(%s)" % error]
-                    for row in rows[-keep:]:
+                    for row in (rows[-keep:] if keep else []):
                         LATE.append("wktrace   %d %s %s" % (i, os.path.basename(name)[8:-4], row[:330]))
                 logs = subprocess.run(["/usr/bin/log", "show", "--last", "4m", "--style", "compact", "--predicate",
                                        'subsystem BEGINSWITH "com.cmuxterm"'], capture_output=True, text=True).stdout.splitlines()
                 hits = [l for l in logs if re.search(r"hand|connection lost|connected to cmux|rejected|failed|timed out|refus", l, re.I)]
-                for l in hits[-2:]:
+                for l in hits[-1:]:
                     LATE.append("wklog     %d %s" % (i, l[:330]))
             if samples:
                 summary = {"pids": samples.get("pids")}
