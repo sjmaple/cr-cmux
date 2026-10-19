@@ -1185,3 +1185,24 @@ fn settings_validate_reports_what_the_owner_would() {
         local(parse(&args(&["settings", "validate", missing.as_str()])).unwrap().unwrap());
     assert_eq!(missing.unwrap_err()["code"], "settings.unreadable");
 }
+
+#[test]
+fn a_read_the_app_timed_out_is_asked_again_and_a_run_is_not() {
+    use super::run::timed_out_read;
+    let timeout =
+        json!({ "code": "timeout", "data": { "method": "system.identify", "deadline_ms": 1999 } });
+    assert!(timed_out_read("system.identify", &timeout));
+    assert!(timed_out_read("snapshot.get", &timeout));
+    assert!(timed_out_read("errors.list", &timeout));
+    assert!(!timed_out_read("action.run", &timeout));
+    assert!(!timed_out_read("system.identify", &json!({ "code": "not_found" })));
+}
+
+#[test]
+fn only_reads_and_keyed_runs_are_resent_after_a_dropped_connection() {
+    use super::run::safe_to_resend;
+    assert!(safe_to_resend("system.identify", &json!({})));
+    assert!(safe_to_resend("action.run", &json!({ "idempotency_key": "mutation_1" })));
+    assert!(!safe_to_resend("action.run", &json!({})));
+    assert!(!safe_to_resend("errors.clear", &json!({})));
+}

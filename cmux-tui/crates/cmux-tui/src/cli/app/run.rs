@@ -43,8 +43,9 @@ pub(in crate::cli) fn insert_run_key(
     Ok(key)
 }
 
-/// One request; a `busy` app that says the run never started is asked again
-/// after the delay it names, at most `BUSY_RETRIES` times.
+/// One request; a `busy` app that says the run never started, or a read the
+/// app timed out ([`timed_out_read`]), is asked again after the delay it
+/// names, at most `BUSY_RETRIES` times.
 pub(in crate::cli) fn request_with_retry(
     stream: &mut UnixStream,
     method: &str,
@@ -59,7 +60,36 @@ pub(in crate::cli) fn request_with_retry(
                 retries += 1;
                 std::thread::sleep(busy_retry_delay(&error));
             }
+            // A read the app did not finish in its own deadline (`system.identify did
+            // not finish within 1999 ms` under load) changes nothing: ask again.
+            Err(error) if retries < BUSY_RETRIES && timed_out_read(method, &error) => {
+                retries += 1;
+                std::thread::sleep(busy_retry_delay(&error));
+            }
             response => return Ok(response),
         }
     }
+}
+
+/// Whether `error` is the app's own `timeout` for a request that only reads
+/// (`system.*`, `snapshot.get`, `*.list`, `*.get`), which is always safe to
+/// send again. A run (`action.run`) that timed out may still apply; it is
+/// never resent here.
+pub(in crate::cli) fn timed_out_read(method: &str, error: &Value) -> bool {
+    reads_only(method) && error.get("code").and_then(Value::as_str) == Some("timeout")
+}
+
+/// Whether `method` only reads app state.
+fn reads_only(method: &str) -> bool {
+    method.starts_with("system.")
+        || method == "snapshot.get"
+        || method.ends_with(".list")
+        || method.ends_with(".get")
+}
+
+/// Whether a request may be sent again on a new connection after the app
+/// dropped the first one: a read, or a run with its idempotency key (the app
+/// replays a finished run and joins one still running).
+pub(in crate::cli) fn safe_to_resend(method: &str, params: &Value) -> bool {
+    reads_only(method) || params.get("idempotency_key").and_then(Value::as_str).is_some()
 }
