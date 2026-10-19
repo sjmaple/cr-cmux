@@ -33,6 +33,9 @@ export function useRowMenu(key: string): ContextMenuItem[] {
   ];
 }
 
+/** The Remote Hosting toggle (Machines), whose row also shows the host's status line. */
+const REMOTE_HOSTING_KEY = "remoteHosting.enabled";
+
 /** Editable text, whose right-click keeps WebKit's Cut, Copy and Paste. */
 const TEXT_FIELDS =
   'input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, [contenteditable]:not([contenteditable="false"])';
@@ -54,7 +57,10 @@ export function SettingRow({
   const labelId = useId();
   const managed = managedOf(state, row.key);
   const customized = state.rows.get(row.key)?.customized ?? false;
-  const disabled = !state.connected || !state.readable || managed !== null;
+  // Remote Hosting's toggle shows the app's live status under it, and is off while the
+  // organization turned remote hosts off.
+  const remoteHosting = row.key === REMOTE_HOSTING_KEY ? state.host?.remote_hosting : null;
+  const disabled = !state.connected || !state.readable || managed !== null || remoteHosting?.disabled_by_policy === true;
   const diagnostics = state.diagnostics.get(row.key);
   const error = state.errors.get(row.key);
   const menu = useRowMenu(row.key);
@@ -80,6 +86,11 @@ export function SettingRow({
           {row.summary && (
             <div className="row-help">
               <Highlight text={text(row.summary)} query={query} />
+            </div>
+          )}
+          {remoteHosting?.status && (
+            <div className="row-help" data-remote-hosting-status="">
+              {remoteHosting.status}
             </div>
           )}
           {query && (
