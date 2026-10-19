@@ -489,6 +489,8 @@ try:
                 done.set()
             threading.Thread(target=call, daemon=True).start()
             samples = {}
+            if not done.wait(0.45):
+                samples["app_text"] = sample_pid(app.pid, "a%d" % i, "app")
             if False and not done.wait(1.2):
                 pids = daemon_pids()
                 threads = [threading.Thread(target=lambda p=p: samples.__setitem__("d%d" % p, sample_pid(p, "d%d" % i, "daemon")))
@@ -517,10 +519,19 @@ try:
             waits = ((err or {}).get("data") or {}).get("waiting_on") if isinstance(err, dict) else None
             entry = {"i": i, "ok": ok, "ms": box.get("ms"), "waits": waits}
             print("wkloop    %s" % json.dumps(entry)[:700], flush=True)
-            if not ok:
-                wait(lambda: False, 20, alive)
+            if not ok or (box.get("ms") or 0) > 900:
+                if not ok:
+                    wait(lambda: False, 20, alive)
                 LATE.append("wklate    %d reply=%s state=%s" % (i, json.dumps(reply)[:500], json.dumps(rpc("browser.page.state"))[:200]))
-                for name, keep in (("/tmp/cmux-wk-app.log", 16), ("/tmp/cmux-wk-daemon.log", 7)):
+                text = samples.get("app_text") or ""
+                for t, p in heavy_paths(text, [""]).items():
+                    names = [n for _, n in p]
+                    if not ("cooperative" in t or "main-thread" in t or any("DaemonConnection" in n for n in names)):
+                        continue
+                    leaf = [re.sub(r"\s+\(in [^)]*\)", "", n)[:60] for n in names[-6:]]
+                    LATE.append("wkstack   %d %s %s| %s" % (i, t[:46], p[0][0], " < ".join(reversed(leaf)))[:420])
+                LATE[:] = LATE[:1] + [r for r in LATE[1:] if r.startswith("wkstack")][:12] + [r for r in LATE[1:] if not r.startswith("wkstack")]
+                for name, keep in (("/tmp/cmux-wk-app.log", 12), ("/tmp/cmux-wk-daemon.log", 2)):
                     try:
                         rows = [r for r in open(name, errors="replace").read().splitlines()
                                 if '{"data":{"generation"' not in r and "wrote reply" not in r and "writing reply" not in r]
@@ -531,7 +542,7 @@ try:
                 logs = subprocess.run(["/usr/bin/log", "show", "--last", "4m", "--style", "compact", "--predicate",
                                        'subsystem BEGINSWITH "com.cmuxterm"'], capture_output=True, text=True).stdout.splitlines()
                 hits = [l for l in logs if re.search(r"hand|connection lost|connected to cmux|rejected|failed|timed out|refus", l, re.I)]
-                for l in hits[-6:]:
+                for l in hits[-2:]:
                     LATE.append("wklog     %d %s" % (i, l[:330]))
             if samples:
                 summary = {"pids": samples.get("pids")}

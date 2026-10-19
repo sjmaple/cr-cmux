@@ -89,7 +89,13 @@ extension DaemonService {
     public func perform<T: Sendable>(_ label: String, _ body: @Sendable (isolated DaemonConnection) async throws -> T) async throws -> T {
         let ticket = openTicket(label)
         let wk = label == "new-frontend-browser-tab"
-        if wk { WkDiag.note("perform ticket connected=\(connection != nil)") }
+        if wk {
+            WkDiag.note("perform ticket connected=\(connection != nil) cpus=\(ProcessInfo.processInfo.activeProcessorCount)")
+            // task-owner: proof only, one note
+            Task.detached(priority: .high) { WkDiag.note("pool probe ran (detached high)") }
+            // task-owner: proof only, one note
+            Task.detached(priority: .medium) { WkDiag.note("pool probe ran (detached medium)") }
+        }
         guard let connection else {
             await closeTicket(ticket, label: label, error: DaemonError.notConnected)
             throw DaemonError.notConnected
