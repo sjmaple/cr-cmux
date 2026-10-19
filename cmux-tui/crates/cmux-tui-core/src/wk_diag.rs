@@ -4,6 +4,9 @@
 use std::io::Write;
 
 pub(crate) fn note(message: &str) {
+    if std::env::var_os("CMUX_WK_DAEMON_TRACE").is_none() {
+        return;
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())

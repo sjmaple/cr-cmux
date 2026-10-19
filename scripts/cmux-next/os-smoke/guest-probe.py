@@ -127,6 +127,23 @@ def _grab_slow(method, started):
     if len(SLOW) >= 3 or "app" not in globals():
         return
     ps = subprocess.run(["/bin/ps", "-Ao", "pcpu=,pri=,comm=", "-r"], capture_output=True, text=True).stdout.splitlines()[:6]
+    stats = None
+    try:
+        socks = glob.glob(os.path.join(os.environ.get("TMPDIR", "/tmp"), "cmux-tui-%d" % os.getuid(), "cmux-app-*.sock"))
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(5)
+        conn.connect(socks[0])
+        conn.sendall(b'{"id":1,"cmd":"server-stats","include":["write_path"]}\n')
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = conn.recv(1 << 20)
+            if not chunk:
+                break
+            buf += chunk
+        conn.close()
+        stats = json.loads(buf)
+    except Exception as error:
+        stats = {"error": str(error)}
     io = subprocess.Popen(["/usr/sbin/iostat", "-d", "-c", "2", "-w", "1"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     path = "/tmp/wk-slow-%d.spindump" % len(SLOW)
     subprocess.run(["/usr/bin/sudo", "-n", "/usr/sbin/spindump", str(app.pid), "1", "10", "-file", path, "-noBulkSymbolication"],
@@ -136,7 +153,7 @@ def _grab_slow(method, started):
         text = open(path, errors="replace").read()
     except OSError:
         text = ""
-    SLOW.append({"method": method, "at": round(time.time() - started, 2), "ps": ps, "text": text, "policy": policy})
+    SLOW.append({"method": method, "at": round(time.time() - started, 2), "ps": ps, "text": text, "policy": policy, "stats": stats})
 
 
 def _heavy(text):
@@ -184,6 +201,15 @@ def dump_slow():
             if re.search(r"suspend|DispatchQueue|main|cooperative|runnable|blocked", l, re.I):
                 print("wksth     %s" % l[:260], flush=True)
         print("wkio      %s" % " ".join(entry.get("policy") or []), flush=True)
+        st = entry.get("stats") or {}
+        data = st.get("data") if isinstance(st.get("data"), dict) else st
+        lock = (data or {}).get("registry_lock") or {}
+        print("wkreg     holder=%s last_stall=%s" % (json.dumps(lock.get("holder")), json.dumps(lock.get("last_stall"))), flush=True)
+        print("wkregtop  %s" % json.dumps(sorted(lock.get("top_sites") or lock.get("sites") or [], key=lambda s: -(s.get("hold_max_us") or 0))[:6])[:900], flush=True)
+        jw = (data or {}).get("journal_writer") or {}
+        print("wkjw      %s" % json.dumps({k: jw.get(k) for k in ("phase", "phase_for_us", "terminal_queued", "durable_queued", "commit_us", "commit_lock_wait_us", "deadline_expiries")})[:900], flush=True)
+        if not data or "error" in st:
+            print("wkregerr  %s" % json.dumps(st)[:300], flush=True)
     for entry in []:
         print("wkslowrpc %s at %ss ncpu=%s ps: %s" % (entry["method"], entry["at"], os.cpu_count(),
               " | ".join(re.sub(r"\s+", " ", l.strip())[:14] + "~" + l.strip()[-22:] for l in entry["ps"])), flush=True)
