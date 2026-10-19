@@ -75,7 +75,7 @@ nonisolated final class DaemonTerminalIO: TerminalIO {
                                                     snapshotVersion: Self.attachSnapshotVersion,
                                                     localHistory: Self.attachLocalHistory,
                                                     images: Self.attachImages,
-                                                    device: await Self.sizingDevice.value)
+                                                    device: nil)
             },
             onFailure: { error in
                 logger.error("attach \(surface) failed: \(String(describing: error), privacy: .public)")
