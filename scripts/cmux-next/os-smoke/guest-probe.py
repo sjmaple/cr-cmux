@@ -119,7 +119,86 @@ SOCKET = socket_path()
 result["socket"] = SOCKET
 
 
+SLOW = []
+
+
+def _grab_slow(method, started):
+    """Proof only: what the app's threads and the guest's CPUs do while a request is slow."""
+    if len(SLOW) >= 3 or "app" not in globals():
+        return
+    ps = subprocess.run(["/bin/ps", "-Ao", "pcpu=,pri=,comm=", "-r"], capture_output=True, text=True).stdout.splitlines()[:6]
+    path = "/tmp/wk-slow-%d.txt" % len(SLOW)
+    subprocess.run(["/usr/bin/sample", str(app.pid), "1", "-mayDie", "-file", path], capture_output=True, timeout=60)
+    try:
+        text = open(path, errors="replace").read()
+    except OSError:
+        text = ""
+    SLOW.append({"method": method, "at": round(time.time() - started, 2), "ps": ps, "text": text})
+
+
+def _heavy(text):
+    out, thread, path, depth = {}, None, [], -1
+    for line in text.splitlines():
+        h = re.match(r"^\s+(\d+) (Thread_\d+.*)$", line)
+        if h:
+            if thread and path:
+                out[thread] = path
+            thread, path, depth = h.group(2), [h.group(1)], -1
+            continue
+        if thread is None:
+            continue
+        m = re.match(r"^(\s*[+!:| ]*)(\d+)\s+(.*)$", line)
+        if not m:
+            if len(path) > 1:
+                out[thread] = path
+            thread = None
+            continue
+        d = len(m.group(1))
+        if d > depth:
+            depth = d
+            name = re.sub(r"\s+\[0x[0-9a-f]+\]$", "", m.group(3))
+            name = re.sub(r"\s+\+ \d+$", "", name)
+            path.append(re.sub(r"\s+\(in [^)]*\)", "", name)[:70])
+        elif len(path) > 1:
+            out[thread] = path
+            thread = None
+    if thread and len(path) > 1:
+        out[thread] = path
+    return out
+
+
+IDLE_LEAF = ("__workq_kernreturn", "mach_msg2_trap", "kevent", "__psynch_cvwait", "semaphore_wait_trap", "read",
+             "__select", "poll", "__semwait_signal", "__accept", "__recvfrom", "__ulock_wait", "start_wqthread")
+
+
+def dump_slow():
+    for entry in SLOW[:2]:
+        print("wkslowrpc %s at %ss ncpu=%s ps: %s" % (entry["method"], entry["at"], os.cpu_count(),
+              " | ".join(re.sub(r"\s+", " ", l.strip())[-48:] for l in entry["ps"])), flush=True)
+        rows = []
+        for t, p in _heavy(entry["text"]).items():
+            frames = p[1:]
+            if "main-thread" not in t and "DispatchQueue" not in t and frames[-1].split(" ")[0] in IDLE_LEAF:
+                continue
+            rows.append("wkthr  %s %s| %s" % (p[0], t[:50], " < ".join(reversed(frames[-5:]))))
+        for r in rows[:11]:
+            print(r[:400], flush=True)
+
+
 def rpc(method, params=None, timeout=30):
+    timer = None
+    if method == "debug.window_snapshot" or (method == "action.run" and (params or {}).get("action") == "openBrowser"):
+        timer = threading.Timer(0.7, _grab_slow, (method, time.time()))
+        timer.daemon = True
+        timer.start()
+    try:
+        return _rpc(method, params, timeout)
+    finally:
+        if timer:
+            timer.cancel()
+
+
+def _rpc(method, params=None, timeout=30):
     try:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         conn.settimeout(timeout)
@@ -613,8 +692,9 @@ try:
                 app.wait()
         write_result()
         print("wksummary %s" % json.dumps({"runs": len(results), "failed": [i for i, r in enumerate(results) if not r]}), flush=True)
-        for row in LATE:
+        for row in LATE[:4]:
             print(row, flush=True)
+        dump_slow()
         for entry in []:
             print("wkslow    %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
             samples = entry.get("samples") or {}
