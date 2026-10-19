@@ -200,6 +200,14 @@ final class LineTransport: Sendable {
         defer { scope?.note("slot \(cmd) #\(id) queued=\(writer.queuedBytes) draining=\(writer.isDraining)") }
         let timer = DemandTimer(owner: "LineTransport.deadline")
         defer { timer.cancel() }
+        let diag = DemandTimer(owner: "LineTransport.diag")
+        defer { diag.cancel() }
+        if scope != nil {
+            diag.schedule(after: .milliseconds(900)) { [weak self] in
+                guard let self else { return }
+                scope?.note("at900 \(cmd) #\(id) queued=\(self.writer.queuedBytes) draining=\(self.writer.isDraining) qos=\(qos_class_self().rawValue)")
+            }
+        }
         if let timeout { timer.schedule(after: timeout) { [weak self] in self?.expire(id: id, after: timeout) } }
         #if DEBUG
         let response = try await slot.value()
