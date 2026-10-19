@@ -630,7 +630,7 @@ try:
             if samples:
                 summary = {"pids": samples.get("pids")}
                 for key, text in samples.items():
-                    if key in ("pids", "netstat") or not text:
+                    if key in ("pids", "netstat", "ps") or not isinstance(text, str) or not text:
                         continue
                     paths = heavy_paths(text, [""])
                     if key == "app":
