@@ -127,9 +127,7 @@ def _grab_slow(method, started):
     if len(SLOW) >= 3 or "app" not in globals():
         return
     ps = subprocess.run(["/bin/ps", "-Ao", "pcpu=,pri=,comm=", "-r"], capture_output=True, text=True).stdout.splitlines()[:6]
-    ti = subprocess.run(["/usr/bin/sudo", "-n", "/usr/bin/taskinfo", str(app.pid)], capture_output=True, text=True)
-    policy = [l.strip() for l in (ti.stdout + ti.stderr).splitlines()
-              if re.search(r"role|tier|darwinbg|qos|nap|latency|throughput|suppress|clamp|bg|boost|importance|apptype|tal", l, re.I)][:14]
+    policy = []
     path = "/tmp/wk-slow-%d.txt" % len(SLOW)
     subprocess.run(["/usr/bin/sample", str(app.pid), "1", "-mayDie", "-file", path], capture_output=True, timeout=60)
     try:
@@ -175,23 +173,24 @@ IDLE_LEAF = ("__workq_kernreturn", "mach_msg2_trap", "kevent", "__psynch_cvwait"
 
 
 def dump_slow():
-    for entry in SLOW[:2]:
+    for entry in SLOW[:1]:
         print("wkslowrpc %s at %ss ncpu=%s ps: %s" % (entry["method"], entry["at"], os.cpu_count(),
               " | ".join(re.sub(r"\s+", " ", l.strip())[:14] + "~" + l.strip()[-22:] for l in entry["ps"])), flush=True)
-        print("wkpolicy  %s" % " ; ".join(entry.get("policy") or [])[:1400], flush=True)
+
         rows = []
         for t, p in _heavy(entry["text"]).items():
             frames = p[1:]
-            if "main-thread" in t or "watchdog" in t or frames[-1].split(" ")[0] in IDLE_LEAF + ("kevent64",):
+            leaf = frames[-1].split(" ")[0]
+            if leaf in ("__workq_kernreturn", "kevent64", "kevent", "mach_msg2_trap", "__select", "poll") and "cooperative" not in t:
                 continue
-            rows.append("wkthr  %s %s| %s" % (p[0], t[:50], " < ".join(reversed(frames[-5:]))))
-        for r in rows[:5]:
-            print(r[:400], flush=True)
+            rows.append("wkthr  %s %s| %s" % (p[0], t[:60], " < ".join(reversed(frames[-12:]))))
+        for r in rows[:22]:
+            print(r[:1100], flush=True)
 
 
 def rpc(method, params=None, timeout=30):
     timer = None
-    if method == "debug.window_snapshot" or (method == "action.run" and (params or {}).get("action") == "openBrowser"):
+    if method == "action.run" and (params or {}).get("action") == "openBrowser" and ((params or {}).get("args") or {}).get("engine") == "webkit":
         timer = threading.Timer(0.7, _grab_slow, (method, time.time()))
         timer.daemon = True
         timer.start()
@@ -696,8 +695,9 @@ try:
                 app.wait()
         write_result()
         print("wksummary %s" % json.dumps({"runs": len(results), "failed": [i for i, r in enumerate(results) if not r]}), flush=True)
-        for row in [r for r in LATE if r.startswith("wklate")][:1] + [r for r in LATE if r.startswith("wktrace") and re.search(r"perform|pool probe|request|submit|quiet|release", r)][-7:]:
-            print(row[:330], flush=True)
+        rows = [r for r in LATE if r.startswith("wktrace") and re.search(r"perform|pool probe|request|submit", r)][-6:]
+        if rows:
+            print("wktl %s" % " ; ".join(r.split(" app ", 1)[-1][:120] for r in rows), flush=True)
         dump_slow()
         for entry in []:
             print("wkslow    %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
