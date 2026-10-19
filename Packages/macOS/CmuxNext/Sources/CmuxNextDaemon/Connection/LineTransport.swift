@@ -396,7 +396,7 @@ final class LineTransport: Sendable {
             state.order.removeAll { $0 == id }
             return (state.eventCount, waiter)
         }
-        if wk { WkDiag.note("reply waiter found=\(waiter != nil) id=\(envelope.id.map(String.init) ?? "nil")") }
+        if wk { WkDiag.note("reply waiter found=\(waiter != nil) id=\(envelope.id.map { "\($0)" } ?? "nil")") }
         guard let (barrier, waiter) = waiter else { return }
         if envelope.ok == true {
             if case .reply(_, let slot) = waiter { slot.resolve(.success(Response(line: line, eventBarrier: barrier))) }
