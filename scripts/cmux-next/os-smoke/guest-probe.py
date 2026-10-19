@@ -127,9 +127,11 @@ def _grab_slow(method, started):
     if len(SLOW) >= 3 or "app" not in globals():
         return
     ps = subprocess.run(["/bin/ps", "-Ao", "pcpu=,pri=,comm=", "-r"], capture_output=True, text=True).stdout.splitlines()[:6]
-    policy = []
-    path = "/tmp/wk-slow-%d.txt" % len(SLOW)
-    subprocess.run(["/usr/bin/sample", str(app.pid), "1", "-mayDie", "-file", path], capture_output=True, timeout=60)
+    io = subprocess.Popen(["/usr/sbin/iostat", "-d", "-c", "2", "-w", "1"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    path = "/tmp/wk-slow-%d.spindump" % len(SLOW)
+    subprocess.run(["/usr/bin/sudo", "-n", "/usr/sbin/spindump", str(app.pid), "1", "10", "-file", path, "-noBulkSymbolication"],
+                   capture_output=True, timeout=90)
+    policy = (io.communicate(timeout=20)[0] or "").splitlines()[-1:]
     try:
         text = open(path, errors="replace").read()
     except OSError:
@@ -174,6 +176,15 @@ IDLE_LEAF = ("__workq_kernreturn", "mach_msg2_trap", "kevent", "__psynch_cvwait"
 
 def dump_slow():
     for entry in SLOW[:1]:
+        text = entry["text"]
+        head = [l.strip() for l in text.splitlines()[:80] if re.match(r"\s*(Duration|Steps|Num samples|CPU Time|Suspend|Note|Process:|Thread QoS|Footprint|Time Since Fork|Num threads)", l)]
+        print("wkspin    %s" % " ; ".join(head)[:900], flush=True)
+        threads = [re.sub(r"\s+", " ", l.strip()) for l in text.splitlines() if re.match(r"\s*Thread 0x", l)]
+        for l in threads[:40]:
+            if re.search(r"suspend|DispatchQueue|main|cooperative|runnable|blocked", l, re.I):
+                print("wksth     %s" % l[:260], flush=True)
+        print("wkio      %s" % " ".join(entry.get("policy") or []), flush=True)
+    for entry in []:
         print("wkslowrpc %s at %ss ncpu=%s ps: %s" % (entry["method"], entry["at"], os.cpu_count(),
               " | ".join(re.sub(r"\s+", " ", l.strip())[:14] + "~" + l.strip()[-22:] for l in entry["ps"])), flush=True)
 
