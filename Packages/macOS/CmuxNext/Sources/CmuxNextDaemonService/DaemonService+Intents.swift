@@ -88,12 +88,15 @@ extension DaemonService {
     /// goes to the action scope (ticket, barrier, failure), and is rethrown.
     public func perform<T: Sendable>(_ label: String, _ body: @Sendable (isolated DaemonConnection) async throws -> T) async throws -> T {
         let ticket = openTicket(label)
+        let wk = label == "new-frontend-browser-tab"
+        if wk { WkDiag.note("perform ticket connected=\(connection != nil)") }
         guard let connection else {
             await closeTicket(ticket, label: label, error: DaemonError.notConnected)
             throw DaemonError.notConnected
         }
         do {
             let value = try await body(connection)
+            if wk { WkDiag.note("perform body returned") }
             await closeTicket(ticket, label: label, error: nil, replying: connection)
             return value
         } catch {

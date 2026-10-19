@@ -152,7 +152,10 @@ public actor DaemonConnection {
     }
 
     public func request<R: DaemonRequest>(_ request: R, timeout: Duration?) async throws -> R.Response {
+        let wk = R.command == "new-frontend-browser-tab"
+        if wk { WkDiag.note("request enter hold=\(handoffHold != nil) inFlight=\(inFlight) ready=\(ready != nil) serial=\(serial)") }
         await waitOutHandoff()
+        if wk { WkDiag.note("request past hold ready=\(ready != nil) serial=\(serial)") }
         guard case .ready(let transport, _, _) = phase else { throw DaemonError.notConnected }
         requestStarted()
         defer { requestEnded() }

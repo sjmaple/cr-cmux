@@ -477,6 +477,7 @@ try:
             return rows
 
         DIAG = []
+        LATE = []
         def webkit_attempt(i):
             url = page + "webkit%d" % i
             done = threading.Event()
@@ -488,7 +489,7 @@ try:
                 done.set()
             threading.Thread(target=call, daemon=True).start()
             samples = {}
-            if not done.wait(1.2):
+            if False and not done.wait(1.2):
                 pids = daemon_pids()
                 threads = [threading.Thread(target=lambda p=p: samples.__setitem__("d%d" % p, sample_pid(p, "d%d" % i, "daemon")))
                            for p, _ in pids[:4]]
@@ -518,14 +519,20 @@ try:
             print("wkloop    %s" % json.dumps(entry)[:700], flush=True)
             if not ok:
                 wait(lambda: False, 20, alive)
-                print("wklate    %d state=%s" % (i, json.dumps(rpc("browser.page.state"))[:300]), flush=True)
-            for name in ("/tmp/cmux-wk-app.log", "/tmp/cmux-wk-daemon.log"):
-                try:
-                    tail = open(name, errors="replace").read().splitlines()[-(45 if not ok else 12):]
-                except OSError as error:
-                    tail = ["(%s)" % error]
-                for row in tail:
-                    print("wktrace   %d %s %s" % (i, os.path.basename(name)[8:-4], row[:400]), flush=True)
+                LATE.append("wklate    %d reply=%s state=%s" % (i, json.dumps(reply)[:500], json.dumps(rpc("browser.page.state"))[:200]))
+                for name, keep in (("/tmp/cmux-wk-app.log", 16), ("/tmp/cmux-wk-daemon.log", 7)):
+                    try:
+                        rows = [r for r in open(name, errors="replace").read().splitlines()
+                                if '{"data":{"generation"' not in r and "wrote reply" not in r and "writing reply" not in r]
+                    except OSError as error:
+                        rows = ["(%s)" % error]
+                    for row in rows[-keep:]:
+                        LATE.append("wktrace   %d %s %s" % (i, os.path.basename(name)[8:-4], row[:330]))
+                logs = subprocess.run(["/usr/bin/log", "show", "--last", "4m", "--style", "compact", "--predicate",
+                                       'subsystem BEGINSWITH "com.cmuxterm"'], capture_output=True, text=True).stdout.splitlines()
+                hits = [l for l in logs if re.search(r"hand|connection lost|connected to cmux|rejected|failed|timed out|refus", l, re.I)]
+                for l in hits[-6:]:
+                    LATE.append("wklog     %d %s" % (i, l[:330]))
             if samples:
                 summary = {"pids": samples.get("pids")}
                 for key, text in samples.items():
@@ -591,7 +598,9 @@ try:
                 app.wait()
         write_result()
         print("wksummary %s" % json.dumps({"runs": len(results), "failed": [i for i, r in enumerate(results) if not r]}), flush=True)
-        for entry in DIAG:
+        for row in LATE:
+            print(row, flush=True)
+        for entry in []:
             print("wkslow    %d ms=%s ok=%s %s" % (entry["i"], entry["ms"], entry["ok"], json.dumps(entry["waits"])[:900]), flush=True)
             samples = entry.get("samples") or {}
             print("wknet     %d %s" % (entry["i"], json.dumps(samples.get("netstat"))[:1500]), flush=True)

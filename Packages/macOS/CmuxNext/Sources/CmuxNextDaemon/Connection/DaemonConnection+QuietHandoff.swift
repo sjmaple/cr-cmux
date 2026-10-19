@@ -22,12 +22,15 @@ extension DaemonConnection {
     /// `quietHandoff` for a handoff whose result says whether the daemon accepted it.
     public func quietHandoff<Result: Sendable>(_ handoff: @Sendable () async -> Result,
                                                accepted: (Result) -> Bool) async -> Result {
+        WkDiag.note("quietHandoff start hold=\(handoffHold != nil) inFlight=\(inFlight)")
         while handoffHold != nil { await withCheckedContinuation { handoffQueue.append($0) } }
         handoffHold = [:]
         if inFlight > 0 { await withCheckedContinuation { quietWaiters.append($0) } }
+        WkDiag.note("quietHandoff quiet; running handoff")
         let startSerial = serial
         // concurrency-allow: async binding on the connection actor, always inside a Swift task (no fallback storage, cx-bpcj)
         let result = await Self.$passesHandoffHold.withValue(true) { await handoff() }
+        WkDiag.note("quietHandoff result accepted=\(accepted(result)) ready=\(isReady) serialMoved=\(serial != startSerial)")
         if !accepted(result) || (isReady && serial != startSerial) {
             releaseHandoffHold()
         } else if handoffHold != nil {
@@ -72,6 +75,7 @@ extension DaemonConnection {
     /// was refused, or the hold limit passed), then the next queued handoff.
     func releaseHandoffHold() {
         guard let held = handoffHold else { return }
+        WkDiag.note("releaseHandoffHold held=\(held.count)")
         handoffHold = nil
         handoffHoldTimer?.cancel()
         handoffHoldTimer = nil
